@@ -579,6 +579,16 @@ static inline void _ohci_writel (const struct ohci_hcd *ohci,
 #else
 		writel (val, regs);
 #endif
+
+#ifdef CONFIG_MACH_TS75XX
+   __asm__ volatile (
+		"mov	%0, #0\n\t"
+		"mcr	p15, 0, %0, c7, c10, 0	\n\t"		
+      :
+      : "r" (regs) 
+      : "%0"  );
+#endif
+
 }
 
 #define ohci_readl(o,r)		_ohci_readl(o,r)
