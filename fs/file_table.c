@@ -34,6 +34,9 @@ struct files_stat_struct files_stat = {
 	.max_files = NR_FILE
 };
 
+DECLARE_LGLOCK(files_lglock);
+DEFINE_LGLOCK(files_lglock);
+
 /* SLAB cache for file structures */
 static struct kmem_cache *filp_cachep __read_mostly;
 
@@ -126,6 +129,7 @@ struct file *get_empty_filp(void)
 	if (security_file_alloc(f))
 		goto fail_sec;
 
+        INIT_LIST_HEAD(&f->f_u.fu_list);
 	atomic_long_set(&f->f_count, 1);
 	rwlock_init(&f->f_owner.lock);
 	spin_lock_init(&f->f_lock);
@@ -248,6 +252,7 @@ static void __fput(struct file *file)
 	}
 	fops_put(file->f_op);
 	put_pid(file->f_owner.pid);
+	file_sb_list_del(file);
 	if ((file->f_mode & (FMODE_READ | FMODE_WRITE)) == FMODE_READ)
 		i_readcount_dec(inode);
 	if (file->f_mode & FMODE_WRITE)
@@ -377,8 +382,96 @@ void put_filp(struct file *file)
 {
 	if (atomic_long_dec_and_test(&file->f_count)) {
 		security_file_free(file);
+		file_sb_list_del(file);
 		file_free(file);
 	}
+}
+
+static inline int file_list_cpu(struct file *file)
+{
+	return smp_processor_id();
+}
+
+/* helper for file_sb_list_add to reduce ifdefs */
+static inline void __file_sb_list_add(struct file *file, struct super_block *sb)
+{
+	struct list_head *list;
+	list = &sb->s_files;
+	list_add(&file->f_u.fu_list, list);
+}
+
+/**
+ * file_sb_list_add - add a file to the sb's file list
+ * @file: file to add
+ * @sb: sb to add it to
+ *
+ * Use this function to associate a file with the superblock of the inode it
+ * refers to.
+ */
+void file_sb_list_add(struct file *file, struct super_block *sb)
+{
+	if (likely(!(file->f_mode & FMODE_WRITE)))
+		return;
+	if (!S_ISREG(file->f_dentry->d_inode->i_mode))
+		return;
+	lg_local_lock(files_lglock);
+	__file_sb_list_add(file, sb);
+	lg_local_unlock(files_lglock);
+}
+
+/**
+ * file_sb_list_del - remove a file from the sb's file list
+ * @file: file to remove
+ * @sb: sb to remove it from
+ *
+ * Use this function to remove a file from its superblock.
+ */
+void file_sb_list_del(struct file *file)
+{
+	if (!list_empty(&file->f_u.fu_list)) {
+		lg_local_lock_cpu(files_lglock, file_list_cpu(file));
+		list_del_init(&file->f_u.fu_list);
+		lg_local_unlock_cpu(files_lglock, file_list_cpu(file));
+	}
+}
+
+EXPORT_SYMBOL(file_sb_list_del);
+
+#define do_file_list_for_each_entry(__sb, __file)		\
+{								\
+	struct list_head *list;					\
+	list = &(sb)->s_files;					\
+	list_for_each_entry((__file), list, f_u.fu_list)
+
+#define while_file_list_for_each_entry				\
+}
+
+/**
+ *	mark_files_ro - mark all files read-only
+ *	@sb: superblock in question
+ *
+ *	All files are marked read-only.  We don't care about pending
+ *	delete files so this should be used in 'force' mode only.
+ */
+void mark_files_ro(struct super_block *sb)
+{
+	struct file *f;
+
+	lg_global_lock(files_lglock);
+	do_file_list_for_each_entry(sb, f) {
+		if (!file_count(f))
+			continue;
+		if (!(f->f_mode & FMODE_WRITE))
+			continue;
+		spin_lock(&f->f_lock);
+		f->f_mode &= ~FMODE_WRITE;
+		spin_unlock(&f->f_lock);
+		if (file_check_writeable(f) != 0)
+			continue;
+		mnt_drop_write(f->f_path.mnt);
+		file_release_write(f);
+	} while_file_list_for_each_entry;
+	lg_global_unlock(files_lglock);
 }
 
 void __init files_init(unsigned long mempages)
@@ -396,5 +489,6 @@ void __init files_init(unsigned long mempages)
 	n = (mempages * (PAGE_SIZE / 1024)) / 10;
 	files_stat.max_files = max_t(unsigned long, n, NR_FILE);
 	files_defer_init();
+	lg_lock_init(files_lglock);
 	percpu_counter_init(&nr_files, 0);
 } 

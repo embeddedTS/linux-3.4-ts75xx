@@ -123,6 +123,7 @@ static struct super_block *alloc_super(struct file_system_type *type)
 			goto out;
 		}
 
+		INIT_LIST_HEAD(&s->s_files);
 		s->s_bdi = &default_backing_dev_info;
 		INIT_HLIST_NODE(&s->s_instances);
 		INIT_HLIST_BL_HEAD(&s->s_anon);
@@ -726,8 +727,7 @@ int do_remount_sb(struct super_block *sb, int flags, void *data, int force)
 	   make sure there are no rw files opened */
 	if (remount_ro) {
 		if (force) {
-			sb->s_readonly_remount = 1;
-			smp_wmb();
+			mark_files_ro(sb);
 		} else {
 			retval = sb_prepare_remount_readonly(sb);
 			if (retval)

@@ -60,6 +60,7 @@ int do_truncate(struct dentry *dentry, loff_t length, unsigned int time_attrs,
 	mutex_unlock(&dentry->d_inode->i_mutex);
 	return ret;
 }
+EXPORT_SYMBOL(do_truncate);
 
 static long do_sys_truncate(const char __user *pathname, loff_t length)
 {
@@ -672,6 +673,7 @@ static struct file *__dentry_open(struct dentry *dentry, struct vfsmount *mnt,
 	f->f_path.dentry = dentry;
 	f->f_path.mnt = mnt;
 	f->f_pos = 0;
+	file_sb_list_add(f, inode->i_sb);
 
 	if (unlikely(f->f_mode & FMODE_PATH)) {
 		f->f_op = &empty_fops;
@@ -716,6 +718,7 @@ static struct file *__dentry_open(struct dentry *dentry, struct vfsmount *mnt,
 
 cleanup_all:
 	fops_put(f->f_op);
+	file_sb_list_del(f);
 	if (f->f_mode & FMODE_WRITE) {
 		put_write_access(inode);
 		if (!special_file(inode->i_mode)) {
