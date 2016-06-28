@@ -129,7 +129,7 @@ struct file *get_empty_filp(void)
 	if (security_file_alloc(f))
 		goto fail_sec;
 
-	INIT_LIST_HEAD(&f->f_u.fu_list);
+        INIT_LIST_HEAD(&f->f_u.fu_list);
 	atomic_long_set(&f->f_count, 1);
 	rwlock_init(&f->f_owner.lock);
 	spin_lock_init(&f->f_lock);
@@ -389,25 +389,14 @@ void put_filp(struct file *file)
 
 static inline int file_list_cpu(struct file *file)
 {
-#ifdef CONFIG_SMP
-	return file->f_sb_list_cpu;
-#else
 	return smp_processor_id();
-#endif
 }
 
 /* helper for file_sb_list_add to reduce ifdefs */
 static inline void __file_sb_list_add(struct file *file, struct super_block *sb)
 {
 	struct list_head *list;
-#ifdef CONFIG_SMP
-	int cpu;
-	cpu = smp_processor_id();
-	file->f_sb_list_cpu = cpu;
-	list = per_cpu_ptr(sb->s_files, cpu);
-#else
 	list = &sb->s_files;
-#endif
 	list_add(&file->f_u.fu_list, list);
 }
 
@@ -421,6 +410,10 @@ static inline void __file_sb_list_add(struct file *file, struct super_block *sb)
  */
 void file_sb_list_add(struct file *file, struct super_block *sb)
 {
+	if (likely(!(file->f_mode & FMODE_WRITE)))
+		return;
+	if (!S_ISREG(file->f_dentry->d_inode->i_mode))
+		return;
 	lg_local_lock(files_lglock);
 	__file_sb_list_add(file, sb);
 	lg_local_unlock(files_lglock);
@@ -442,25 +435,7 @@ void file_sb_list_del(struct file *file)
 	}
 }
 
-#ifdef CONFIG_SMP
-
-/*
- * These macros iterate all files on all CPUs for a given superblock.
- * files_lglock must be held globally.
- */
-#define do_file_list_for_each_entry(__sb, __file)		\
-{								\
-	int i;							\
-	for_each_possible_cpu(i) {				\
-		struct list_head *list;				\
-		list = per_cpu_ptr((__sb)->s_files, i);		\
-		list_for_each_entry((__file), list, f_u.fu_list)
-
-#define while_file_list_for_each_entry				\
-	}							\
-}
-
-#else
+EXPORT_SYMBOL(file_sb_list_del);
 
 #define do_file_list_for_each_entry(__sb, __file)		\
 {								\
@@ -470,8 +445,6 @@ void file_sb_list_del(struct file *file)
 
 #define while_file_list_for_each_entry				\
 }
-
-#endif
 
 /**
  *	mark_files_ro - mark all files read-only
@@ -484,12 +457,8 @@ void mark_files_ro(struct super_block *sb)
 {
 	struct file *f;
 
-retry:
 	lg_global_lock(files_lglock);
 	do_file_list_for_each_entry(sb, f) {
-		struct vfsmount *mnt;
-		if (!S_ISREG(f->f_path.dentry->d_inode->i_mode))
-		       continue;
 		if (!file_count(f))
 			continue;
 		if (!(f->f_mode & FMODE_WRITE))
@@ -499,13 +468,8 @@ retry:
 		spin_unlock(&f->f_lock);
 		if (file_check_writeable(f) != 0)
 			continue;
+		mnt_drop_write(f->f_path.mnt);
 		file_release_write(f);
-		mnt = mntget(f->f_path.mnt);
-		/* This can sleep, so we can't hold the spinlock. */
-		lg_global_unlock(files_lglock);
-		mnt_drop_write(mnt);
-		mntput(mnt);
-		goto retry;
 	} while_file_list_for_each_entry;
 	lg_global_unlock(files_lglock);
 }
