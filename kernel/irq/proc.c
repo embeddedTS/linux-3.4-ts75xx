@@ -12,6 +12,7 @@
 #include <linux/seq_file.h>
 #include <linux/interrupt.h>
 #include <linux/kernel_stat.h>
+#include <linux/mutex.h>
 
 #include "internals.h"
 
@@ -458,13 +459,41 @@ static struct file_operations irq_proc_file_operations = {
 
 #endif
 
+/*
+* Access rules:
+*
+* procfs protects read/write of /proc/irq/N/ files against a
+* concurrent free of the interrupt descriptor. remove_proc_entry()
+* immediately prevents new read/writes to happen and waits for
+* already running read/write functions to complete.
+*
+* We remove the proc entries first and then delete the interrupt
+* descriptor from the radix tree and free it. So it is guaranteed
+* that irq_to_desc(N) is valid as long as the read/writes are
+* permitted by procfs.
+*
+* The read from /proc/interrupts is a different problem because there
+* is no protection. So the lookup and the access to irqdesc
+* information must be protected by sparse_irq_lock.
+*/
 void register_irq_proc(unsigned int irq, struct irq_desc *desc)
 {
    struct proc_dir_entry *entry;
+	static DEFINE_MUTEX(register_lock);		
 	char name [MAX_NAMELEN];
 
-	if (!root_irq_dir || (desc->irq_data.chip == &no_irq_chip) || desc->dir)
+	if (!root_irq_dir || (desc->irq_data.chip == &no_irq_chip))
 		return;
+
+       /*
+        * irq directories are registered only when a handler is
+        * added, not when the descriptor is created, so multiple
+        * tasks might try to register at the same time.
+        */
+       mutex_lock(&register_lock);
+
+       if (desc->dir)
+               goto out_unlock;
 
 	memset(name, 0, MAX_NAMELEN);
 	sprintf(name, "%d", irq);
@@ -472,7 +501,7 @@ void register_irq_proc(unsigned int irq, struct irq_desc *desc)
 	/* create /proc/irq/1234 */
 	desc->dir = proc_mkdir(name, root_irq_dir);
 	if (!desc->dir)
-		return;
+		goto out_unlock;	
 	
 #if defined(CONFIG_TS75XX_USERSPACE_IRQS)			
 		/*
@@ -515,6 +544,8 @@ void register_irq_proc(unsigned int irq, struct irq_desc *desc)
 			 &irq_node_proc_fops, (void *)(long)irq);
 #endif
 
+out_unlock:
+	mutex_unlock(&register_lock);
 }
 
 void unregister_irq_proc(unsigned int irq, struct irq_desc *desc)
@@ -615,9 +646,10 @@ int show_interrupts(struct seq_file *p, void *v)
 		seq_putc(p, '\n');
 	}
 
+	irq_lock_sparse();
 	desc = irq_to_desc(i);
 	if (!desc)
-		return 0;
+		goto outsparse;
 
 	raw_spin_lock_irqsave(&desc->lock, flags);
 	for_each_online_cpu(j)
@@ -655,6 +687,8 @@ int show_interrupts(struct seq_file *p, void *v)
 	seq_putc(p, '\n');
 out:
 	raw_spin_unlock_irqrestore(&desc->lock, flags);
+outsparse:
+	irq_unlock_sparse();
 	return 0;
 }
 #endif
