@@ -3,9 +3,9 @@ if ARCH_STR8100
 menu "STR8100 Implementations"
 
 config MACH_TS75XX
-	bool "Technologic Systems TS75XX"	
+	bool "embeddedTS TS75XX"	
 	help
-	  Say Y here if you have a Technologic Systems TS75XX board.
+	  Say Y here if you have a embeddedTS TS75XX board.
 	  This board is based on the Cavium Networks CNS2132 (aka STR8132).
 	  	  
 endmenu	  
@@ -150,7 +150,7 @@ config TS75XX_USERSPACE_IRQS
    depends on MACH_TS75XX && ARCH_STR8100
    help
       Enable this option if you want to use userspace IRQs on your
-      Technologic Systems TS-75XX SBC
+      embeddedTS TS-75XX SBC
       
       
 

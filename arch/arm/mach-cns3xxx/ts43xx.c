@@ -1,7 +1,7 @@
 /*
  *  linux/arch/arm/mach-cns3xxx/ts43xx.c
  *
- *  Copyright (c) 2012 Technologic Systems
+ *  Copyright (c) 2012-2022 Technologic Systems, Inc. dba embeddedTS
  *  Copyright (c) 2008 Cavium Networks 
  *  Copyright (C) 2008 ARM Limited
  *  Copyright (C) 2000 Deep Blue Solutions Ltd
@@ -743,7 +743,7 @@ static void show_board_version(void)
 	cns3xxx_pwr_power_up(0x1 << PM_CLK_GATE_REG_OFFSET_GPIO);
 	cns3xxx_pwr_soft_rst(0x1 << PM_CLK_GATE_REG_OFFSET_GPIO);
 	
-	printk("Technologic Systems TS-4300\n");
+	printk("embeddedTS TS-4300\n");
 	
 }
 
@@ -843,7 +843,7 @@ static void __init cns3xxx_init(void)
 }
 
 
-MACHINE_START(TS43XX, "Technologic Systems TS-43XX ARM11 MPCore")
+MACHINE_START(TS43XX, "embeddedTS TS-43XX ARM11 MPCore")
 	.atag_offset	= CNS3XXX_DDR2SDRAM_BASE + 0x100,
 	.fixup		= ts43xx_fixup,
 	.map_io		= ts43xx_map_io,

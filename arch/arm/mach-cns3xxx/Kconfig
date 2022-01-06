@@ -15,7 +15,7 @@ config MACH_TS43XX
 	   select ARM_GIC	
 	   select NEED_MACH_MEMORY_H
 	   help
-	   Include support for the Technologic Systems TS-43XX board.  This
+	   Include support for the embeddedTS TS-43XX board.  This
 	   is based on the CNS3XXX ARM11 MPCore SoC.	  
 
 	   
